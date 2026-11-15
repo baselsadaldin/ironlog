@@ -1,5 +1,5 @@
 // Offline support: cache the app shell. Bump VERSION whenever you change any app file.
-const VERSION = 'ironlog-v8';
+const VERSION = 'ironlog-v9';
 const FILES = [
   './', './index.html', './styles.css', './app.js', './exercises.js', './exercise-info.js', './manifest.json',
   './icons/logo.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'
