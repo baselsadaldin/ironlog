@@ -69,6 +69,51 @@ function freshState() {
   };
 }
 
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const okId = v => typeof v === 'string' && SAFE_ID.test(v);
+const numStr = v => String(v ?? '').replace(/[^0-9.,]/g, '').slice(0, 12);
+const str = (v, max = 2000) => (v == null ? '' : String(v)).slice(0, max);
+const num0 = v => (Number.isFinite(+v) ? +v : 0);
+function cleanSets(sets) {
+  return (Array.isArray(sets) ? sets : []).map(x => ({
+    id: okId(x && x.id) ? x.id : uid(), weight: numStr(x && x.weight), reps: numStr(x && x.reps),
+    type: ['n', 'w', 'd', 'f'].includes(x && x.type) ? x.type : 'n', ...(x && x.done ? { done: true } : {}),
+  }));
+}
+function cleanWorkoutExercises(list, exIds) {
+  return (Array.isArray(list) ? list : []).filter(e => e && exIds.has(e.exerciseId)).map(e => ({
+    id: okId(e.id) ? e.id : uid(), exerciseId: e.exerciseId, sets: cleanSets(e.sets), ...(e.note != null ? { note: str(e.note) } : {}),
+  }));
+}
+// Anything stored or restored is treated as untrusted: ids/units/types that end up inside HTML attributes
+// are checked against strict patterns, so a tampered backup file can't inject markup or script.
+function sanitize(s) {
+  s.settings = { unit: s.settings.unit === 'lb' ? 'lb' : 'kg', rest: Math.max(0, Math.min(3600, num0(s.settings.rest))), sound: s.settings.sound !== false };
+  s.exercises = s.exercises.filter(e => e && okId(e.id)).map(e => ({
+    id: e.id, name: str(e.name, 120) || 'Exercise', category: str(e.category, 40), bodyPart: str(e.bodyPart, 40),
+    custom: !!e.custom, media: /^\d{4}$/.test(e.media) ? e.media : null,
+  }));
+  const exIds = new Set(s.exercises.map(e => e.id));
+  s.templates = s.templates.filter(t => t && typeof t === 'object').map(t => ({
+    id: okId(t.id) ? t.id : uid(), name: str(t.name, 120), notes: str(t.notes), created: num0(t.created),
+    exercises: cleanWorkoutExercises(t.exercises, exIds),
+  }));
+  const tplIds = new Set(s.templates.map(t => t.id));
+  const cleanWorkout = w => ({
+    id: okId(w.id) ? w.id : uid(), name: str(w.name, 120), notes: str(w.notes), templateId: tplIds.has(w.templateId) ? w.templateId : null,
+    start: num0(w.start), end: num0(w.end) || num0(w.start), exercises: cleanWorkoutExercises(w.exercises, exIds),
+    prs: (Array.isArray(w.prs) ? w.prs : []).filter(p => p && exIds.has(p.exerciseId))
+      .map(p => ({ exerciseId: p.exerciseId, kind: str(p.kind, 40), value: num0(p.value) })),
+  });
+  s.history = s.history.filter(w => w && typeof w === 'object').map(cleanWorkout);
+  if (s.active && typeof s.active === 'object') {
+    const a = cleanWorkout(s.active);
+    const r = s.active.rest;
+    s.active = { ...a, rest: r && Number.isFinite(+r.end) && Number.isFinite(+r.total) ? { end: +r.end, total: +r.total } : null };
+  } else s.active = null;
+  return s;
+}
+
 function migrate(d) {
   const s = Object.assign(freshState(), d);
   s.settings = Object.assign({ unit: 'kg', rest: 90, sound: true }, d.settings || {});
@@ -80,7 +125,7 @@ function migrate(d) {
   for (const b of builtinExercises()) if (!have.has(b.id)) s.exercises.push(b);
   const bmap = new Map(builtinExercises().map(b => [b.id, b]));
   for (const e of s.exercises) if (!e.custom && bmap.has(e.id)) e.media = bmap.get(e.id).media;
-  return s;
+  return sanitize(s);
 }
 
 function load() {
@@ -104,12 +149,18 @@ const MEDIA_BASE = window.EXERCISE_MEDIA_BASE || '';
 function exImg(e, frame = 0) { return e && e.media ? `${MEDIA_BASE}${e.media}-${frame ? 'tension' : 'relaxation'}.png` : null; }
 function exThumb(e, cls = 'thumb') {
   const u = exImg(e);
-  return `<span class="${cls}"><b>${esc((e.name || '?')[0].toUpperCase())}</b>${u ? `<img src="${u}" loading="lazy" alt="" onerror="this.remove()">` : ''}</span>`;
+  return `<span class="${cls}"><b>${esc((e.name || '?')[0].toUpperCase())}</b>${u ? `<img src="${u}" loading="lazy" alt="" data-fallback="remove">` : ''}</span>`;
 }
 function exHero(e) {
   if (!e.media) return '';
-  return `<div class="hero"><img src="${exImg(e, 0)}" alt="" onerror="this.parentNode.remove()"><img class="f2" src="${exImg(e, 1)}" alt="" onerror="this.remove()"></div>`;
+  return `<div class="hero"><img src="${exImg(e, 0)}" alt="" data-fallback="hero"><img class="f2" src="${exImg(e, 1)}" alt="" data-fallback="remove"></div>`;
 }
+// broken/offline images: hide them (replaces inline onerror handlers)
+document.addEventListener('error', ev => {
+  const t = ev.target;
+  if (!t || t.tagName !== 'IMG' || !t.dataset.fallback) return;
+  if (t.dataset.fallback === 'hero') { const h = t.closest('.hero'); if (h) h.remove(); } else t.remove();
+}, true);
 function exLabel(e) { return e.category && e.category !== 'Other' ? `${e.name} (${e.category})` : e.name; }
 const noWeight = e => e.category === 'Bodyweight';
 function weightHeader(e) {
@@ -842,7 +893,7 @@ function exportCSV() {
         { n: 'normal', w: 'warmup', d: 'drop', f: 'failure' }[s.type] || 'normal', s.weight, s.reps, w.notes || '']));
     }
   }
-  const csv = rows.map(r => r.map(v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(',')).join('\n');
+  const csv = rows.map(r => r.map(v => { let s = String(v ?? ''); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(',')).join('\n');
   shareOrDownload(csv, `ironlog-history-${dateStamp()}.csv`, 'text/csv');
 }
 document.getElementById('import-file').addEventListener('change', async e => {

@@ -6,6 +6,13 @@ import http.server, socketserver, os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 class NoCache(http.server.SimpleHTTPRequestHandler):
+    def send_head(self):
+        # refuse hidden files/folders (.git etc.) - this server is reachable from your Wi-Fi
+        if any(part.startswith('.') for part in self.path.split('?')[0].split('/')):
+            self.send_error(404)
+            return None
+        return super().send_head()
+
     def end_headers(self):
         self.send_header("Cache-Control", "no-store, must-revalidate")
         super().end_headers()

@@ -1,7 +1,7 @@
 // Built-in exercise library: [name, equipment category, body part, illustration id]
 // Illustrations, muscles and steps: Everkinetic (https://github.com/everkinetic/data), CC BY-SA 4.0.
 // Each exercise has two drawings: "relaxation" (start) and "tension" (end) position.
-window.EXERCISE_MEDIA_BASE = 'https://cdn.jsdelivr.net/gh/everkinetic/data@master/dist/png/';
+window.EXERCISE_MEDIA_BASE = 'https://cdn.jsdelivr.net/gh/everkinetic/data@6f3ce86eb79b17e7bbaf588b7960149725bc8fc7/dist/png/';
 window.BUILTIN_EXERCISES = [
   // Chest
   ['Bench Press', 'Barbell', 'Chest', '0042'],
