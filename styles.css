@@ -344,3 +344,18 @@ svg.fill { fill: currentColor; stroke: none; }
 .sp-name { margin-top: 26px; font-size: 38px; font-weight: 800; letter-spacing: -.02em; animation: rise .5s .45s both; }
 .sp-tag { margin-top: 4px; font-size: 16px; font-weight: 500; color: var(--muted); animation: rise .5s .55s both; }
 @media (prefers-reduced-motion: reduce) { #splash *, #splash { animation: none !important; transition: none !important; } }
+
+/* ---------- swipe a set to delete ---------- */
+.swipe { position: relative; overflow: hidden; border-radius: 8px; margin: 0 -4px; }
+.swipe > .set-row { position: relative; z-index: 1; margin: 0; background: var(--bg); touch-action: pan-y;
+  transition: transform .25s cubic-bezier(.2,.8,.2,1), background-color .2s; will-change: transform; }
+.swipe > .set-row.done { background: var(--green-tint); }
+.swipe > .set-row.pr { background: linear-gradient(90deg, #fff4d6, #e7f8ec 70%); }
+.swipe-del { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 22px; background: var(--danger); color: #fff; font-weight: 700; font-size: 15px; border-radius: 8px; }
+.swipe-del { visibility: hidden; }
+.swipe.reveal .swipe-del { visibility: visible; }
+.swipe.arming .swipe-del { background: #d70015; }
+.swipe.removing { transition: max-height .2s ease .05s, opacity .2s; max-height: 0; opacity: 0; }
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast-btn { color: #4da3ff; font-weight: 700; font-size: 15px; padding: 2px 4px; }

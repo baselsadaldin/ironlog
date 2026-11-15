@@ -269,6 +269,7 @@ function render() {
 
   app.querySelectorAll('textarea').forEach(autoGrow);
   app.querySelectorAll('[data-info]').forEach(fillExerciseInfo);
+  maybeShowSetTip();
   app.querySelectorAll('[data-scroll]').forEach(el => { if (scrolls[el.dataset.scroll] != null) el.scrollTop = scrolls[el.dataset.scroll]; });
   tick();
 }
@@ -568,14 +569,16 @@ function renderEditor(w, mode) {
       const label = s.type === 'w' ? 'W' : s.type === 'd' ? 'D' : s.type === 'f' ? 'F' : String(++n);
       const p = prev[si];
       const prevTxt = p ? (bw ? `${fmtNum(num(p.reps))} reps` : `${fmtNum(num(p.weight))} × ${fmtNum(num(p.reps))}`) : '—';
-      return `<div class="set-row ${s.done ? 'done' : ''} ${prs[s.id] ? 'pr' : ''} ${showCheck ? '' : 'nocheck'}" data-row="${s.id}">
+      return `<div class="swipe" data-we="${we.id}" data-s="${s.id}">
+      <button class="swipe-del" data-act="set-del" data-we="${we.id}" data-s="${s.id}" tabindex="-1">Delete</button>
+      <div class="set-row ${s.done ? 'done' : ''} ${prs[s.id] ? 'pr' : ''} ${showCheck ? '' : 'nocheck'}" data-row="${s.id}">
         <button class="set-num t-${s.type}" data-act="set-menu" data-we="${we.id}" data-s="${s.id}">${prs[s.id] ? I.trophy : label}</button>
         <button class="prev" data-act="fill-prev" data-we="${we.id}" data-s="${s.id}" ${p ? '' : 'disabled'}>${prevTxt}</button>
         ${bw ? '<span class="in placeholder-cell"></span>' :
           `<input class="in" inputmode="decimal" enterkeyhint="next" data-f="set" data-k="weight" data-we="${we.id}" data-s="${s.id}" value="${esc(s.weight)}" placeholder="${p && !bw ? esc(fmtNum(num(p.weight))) : ''}">`}
         <input class="in" inputmode="numeric" enterkeyhint="done" data-f="set" data-k="reps" data-we="${we.id}" data-s="${s.id}" value="${esc(s.reps)}" placeholder="${p ? esc(fmtNum(num(p.reps))) : ''}">
         ${showCheck ? `<button class="chk" data-act="set-done" data-we="${we.id}" data-s="${s.id}" aria-label="Complete set">${I.check}</button>` : ''}
-      </div>`;
+      </div></div>`;
     }).join('');
     return `<div class="ex-block">
       <div class="row-between">
@@ -750,11 +753,18 @@ function formDialog(title, fields, okLabel = 'Save') {
   });
 }
 let toastTimer;
-function toast(msg) {
+function toast(msg, action) {
   let el = document.querySelector('.toast');
   if (!el) { el = document.createElement('div'); el.className = 'toast'; document.body.appendChild(el); }
-  el.textContent = msg; el.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+  el.textContent = msg;
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 'toast-btn'; b.textContent = action.label;
+    b.addEventListener('click', ev => { ev.stopPropagation(); el.classList.remove('show'); action.fn(); }, { once: true });
+    el.appendChild(b);
+  }
+  el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), action ? 4500 : 2600);
 }
 
 // ---------------------------------------------------------------- sound
@@ -1098,6 +1108,95 @@ function fillExerciseInfo(el) {
     ${(d.instructions || []).length ? `<details class="card howto"><summary>How to do it</summary><ol>${d.instructions.map(x => `<li>${esc(x)}</li>`).join('')}</ol></details>` : ''}`;
 }
 
+// ---------------------------------------------------------------- deleting sets (swipe or menu) with undo
+function deleteSet(ctx, weId, setId) {
+  const w = ctxWorkout(ctx), we = w && findWE(w, weId);
+  if (!we) return;
+  const i = we.sets.findIndex(x => x.id === setId);
+  if (i < 0) return;
+  const [removed] = we.sets.splice(i, 1);
+  persistCtx(ctx); render();
+  toast('Set deleted', { label: 'Undo', fn: () => {
+    const w2 = ctxWorkout(ctx), we2 = w2 && findWE(w2, weId);
+    if (!we2) return;
+    we2.sets.splice(Math.min(i, we2.sets.length), 0, removed);
+    persistCtx(ctx); render();
+  } });
+}
+
+// Swipe a set row left: short swipe reveals "Delete", long swipe deletes straight away.
+const SWIPE_OPEN = 88;
+let swipe = null;
+function closeSwipes(except) {
+  document.querySelectorAll('.swipe.open').forEach(w => {
+    if (w === except) return;
+    w.classList.remove('open', 'arming');
+    const r = w.querySelector('.set-row'); if (r) r.style.transform = '';
+    setTimeout(() => { if (!w.classList.contains('open')) w.classList.remove('reveal'); }, 260);
+  });
+}
+document.addEventListener('pointerdown', e => {
+  const row = e.target.closest('.swipe > .set-row');
+  const wrap = row && row.parentNode;
+  if (!e.target.closest('.swipe-del')) closeSwipes(wrap);
+  if (!row || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  swipe = { row, wrap, id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, active: false, base: wrap.classList.contains('open') ? -SWIPE_OPEN : 0 };
+});
+document.addEventListener('pointermove', e => {
+  if (!swipe || e.pointerId !== swipe.id) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  if (!swipe.active) {
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; } // vertical scroll
+    if (Math.abs(dx) < 10) return;
+    swipe.active = true;
+    swipe.wrap.classList.add('reveal');
+    swipe.row.style.transition = 'none';
+    if (document.activeElement && swipe.row.contains(document.activeElement)) document.activeElement.blur();
+  }
+  const width = swipe.wrap.offsetWidth;
+  let off = Math.min(0, swipe.base + dx);
+  if (off < -width) off = -width;
+  swipe.dx = off;
+  swipe.row.style.transform = `translateX(${off}px)`;
+  swipe.wrap.classList.toggle('arming', off < -width * 0.55);
+});
+function endSwipe(e) {
+  if (!swipe || e.pointerId !== swipe.id) return;
+  const s = swipe; swipe = null;
+  if (!s.active) return;
+  s.wrap.dataset.swipedAt = Date.now();
+  s.row.style.transition = '';
+  const width = s.wrap.offsetWidth;
+  if (s.dx < -width * 0.55) {
+    s.row.style.transform = `translateX(${-width}px)`;
+    s.wrap.classList.add('removing');
+    setTimeout(() => deleteSet(getCtx(s.wrap), s.wrap.dataset.we, s.wrap.dataset.s), 200);
+  } else if (s.dx < -SWIPE_OPEN / 2) {
+    s.row.style.transform = `translateX(${-SWIPE_OPEN}px)`;
+    s.wrap.classList.add('open'); s.wrap.classList.remove('arming');
+  } else {
+    s.row.style.transform = '';
+    s.wrap.classList.remove('open', 'arming');
+    setTimeout(() => { if (!s.wrap.classList.contains('open')) s.wrap.classList.remove('reveal'); }, 260);
+  }
+}
+document.addEventListener('pointerup', endSwipe);
+document.addEventListener('pointercancel', endSwipe);
+// a swipe shouldn't also count as a tap on the number/checkmark under your finger
+document.addEventListener('click', e => {
+  const wrap = e.target.closest('.swipe');
+  if (!wrap || e.target.closest('.swipe-del')) return;
+  if (Date.now() - (+wrap.dataset.swipedAt || 0) < 400) { e.stopPropagation(); e.preventDefault(); }
+}, true);
+
+function maybeShowSetTip() {
+  try {
+    if (localStorage.getItem('ironlog.tip.sets') || !document.querySelector('.swipe')) return;
+    localStorage.setItem('ironlog.tip.sets', '1');
+  } catch (e) { return; }
+  setTimeout(() => toast('Tip: swipe a set left to delete it. Tap the set number for more options.'), 900);
+}
+
 // ---------------------------------------------------------------- actions
 function getCtx(el) { const c = el.closest('[data-ctx]'); return c ? c.dataset.ctx : null; }
 function findWE(w, id) { return w.exercises.find(e => e.id === id); }
@@ -1185,13 +1284,19 @@ const ACTIONS = {
   },
   'set-menu': async el => {
     const ctx = getCtx(el), w = ctxWorkout(ctx), we = findWE(w, el.dataset.we), s = we.sets.find(x => x.id === el.dataset.s);
-    const c = await actionSheet('Set type', [
-      { label: 'Normal set', value: 'n' }, { label: 'Warm-up set (W)', value: 'w' }, { label: 'Drop set (D)', value: 'd' }, { label: 'Failure set (F)', value: 'f' },
+    const idx = we.sets.indexOf(s);
+    const types = [['n', 'Normal set'], ['w', 'Warm-up set (W)'], ['d', 'Drop set (D)'], ['f', 'Failure set (F)']];
+    const c = await actionSheet(`Set ${idx + 1} · ${exLabel(exById(we.exerciseId))}`, [
+      ...types.map(([v, l]) => ({ label: (s.type === v ? '✓  ' : '') + l, value: v })),
+      { label: 'Duplicate set', value: 'dup' },
       { label: 'Delete set', value: 'del', danger: true }]);
     if (!c) return;
-    if (c === 'del') we.sets = we.sets.filter(x => x !== s); else s.type = c;
+    if (c === 'del') return deleteSet(ctx, we.id, s.id);
+    if (c === 'dup') we.sets.splice(idx + 1, 0, newSet(s.weight, s.reps, s.type));
+    else s.type = c;
     persistCtx(ctx); render();
   },
+  'set-del': el => deleteSet(getCtx(el), el.dataset.we, el.dataset.s),
   'fill-prev': el => {
     const ctx = getCtx(el), w = ctxWorkout(ctx), we = findWE(w, el.dataset.we);
     const si = we.sets.findIndex(x => x.id === el.dataset.s), s = we.sets[si];
