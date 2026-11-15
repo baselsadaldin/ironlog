@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>IronLog</title>
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="IronLog">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Opening screen: shown instantly at launch, faded out by app.js -->
+  <div id="splash" aria-hidden="true">
+    <svg class="sp-mark" viewBox="190 300 644 424">
+      <rect class="sp-bar" x="250" y="487" width="524" height="50" rx="25"/>
+      <rect class="sp-p sp-in-l" x="300" y="322" width="84" height="380" rx="30"/>
+      <rect class="sp-p sp-in-r" x="640" y="322" width="84" height="380" rx="30"/>
+      <rect class="sp-p sp-out-l" x="214" y="392" width="66" height="240" rx="26"/>
+      <rect class="sp-p sp-out-r" x="744" y="392" width="66" height="240" rx="26"/>
+    </svg>
+    <div class="sp-name">IronLog</div>
+    <div class="sp-tag">Every rep counts.</div>
+  </div>
+  <div id="app"></div>
+  <input type="file" id="import-file" accept="application/json,.json" hidden>
+  <script src="exercises.js"></script>
+  <script src="exercise-info.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
