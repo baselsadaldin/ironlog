@@ -326,9 +326,12 @@ svg.fill { fill: currentColor; stroke: none; }
 
 /* ---------- opening screen ---------- */
 #splash { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #4c9bff, #0a4fd6); color: #fff; transition: opacity .45s ease, transform .45s ease; }
+  background: #fff; color: #000; transition: opacity .45s ease, transform .45s ease; }
+.sp-tile { width: 128px; height: 128px; border-radius: 30px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #4c9bff, #0a4fd6); box-shadow: 0 14px 34px rgba(10,79,214,.35);
+  animation: medalIn .7s cubic-bezier(.2,1.4,.4,1) both; }
 #splash.hide { opacity: 0; transform: scale(1.08); pointer-events: none; }
-.sp-mark { width: 150px; height: auto; fill: #fff; overflow: visible; }
+.sp-mark { width: 92px; height: auto; fill: #fff; overflow: visible; }
 .sp-bar { transform-origin: 512px 512px; animation: spBar .45s cubic-bezier(.2,.9,.3,1) both; }
 .sp-p { animation: .5s cubic-bezier(.2,1.5,.4,1) both; }
 .sp-in-l { animation-name: spL; animation-delay: .2s; }
@@ -339,5 +342,5 @@ svg.fill { fill: currentColor; stroke: none; }
 @keyframes spL { from { transform: translateX(-140px); opacity: 0; } }
 @keyframes spR { from { transform: translateX(140px); opacity: 0; } }
 .sp-name { margin-top: 26px; font-size: 38px; font-weight: 800; letter-spacing: -.02em; animation: rise .5s .45s both; }
-.sp-tag { margin-top: 4px; font-size: 16px; font-weight: 500; opacity: .85; animation: rise .5s .55s both; }
+.sp-tag { margin-top: 4px; font-size: 16px; font-weight: 500; color: var(--muted); animation: rise .5s .55s both; }
 @media (prefers-reduced-motion: reduce) { #splash *, #splash { animation: none !important; transition: none !important; } }
