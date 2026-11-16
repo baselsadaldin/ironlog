@@ -61,7 +61,7 @@ function seedTemplates() {
 function freshState() {
   return {
     version: 1,
-    settings: { unit: 'kg', rest: 90, sound: true },
+    settings: { unit: 'kg', rest: 90, sound: true, sets: 3 },
     exercises: builtinExercises(),
     templates: seedTemplates(),
     history: [],
@@ -88,7 +88,7 @@ function cleanWorkoutExercises(list, exIds) {
 // Anything stored or restored is treated as untrusted: ids/units/types that end up inside HTML attributes
 // are checked against strict patterns, so a tampered backup file can't inject markup or script.
 function sanitize(s) {
-  s.settings = { unit: s.settings.unit === 'lb' ? 'lb' : 'kg', rest: Math.max(0, Math.min(3600, num0(s.settings.rest))), sound: s.settings.sound !== false };
+  s.settings = { unit: s.settings.unit === 'lb' ? 'lb' : 'kg', rest: Math.max(0, Math.min(3600, num0(s.settings.rest))), sound: s.settings.sound !== false, sets: Math.max(1, Math.min(10, Math.round(num0(s.settings.sets)) || 3)) };
   s.exercises = s.exercises.filter(e => e && okId(e.id)).map(e => ({
     id: e.id, name: str(e.name, 120) || 'Exercise', category: str(e.category, 40), bodyPart: str(e.bodyPart, 40),
     custom: !!e.custom, media: /^\d{4}$/.test(e.media) ? e.media : null,
@@ -116,7 +116,7 @@ function sanitize(s) {
 
 function migrate(d) {
   const s = Object.assign(freshState(), d);
-  s.settings = Object.assign({ unit: 'kg', rest: 90, sound: true }, d.settings || {});
+  s.settings = Object.assign({ unit: 'kg', rest: 90, sound: true, sets: 3 }, d.settings || {});
   s.exercises = Array.isArray(d.exercises) ? d.exercises : [];
   s.templates = Array.isArray(d.templates) ? d.templates : [];
   s.history = Array.isArray(d.history) ? d.history : [];
@@ -447,6 +447,7 @@ function renderSettingsTab() {
       <button class="list-row" data-act="set-unit"><span>Weight unit</span><span class="muted">${s.unit}</span></button>
       <button class="list-row" data-act="set-rest"><span>Default rest timer</span><span class="muted">${s.rest ? fmtDuration(s.rest * 1000) : 'Off'}</span></button>
       <button class="list-row" data-act="toggle-sound"><span>Rest timer sound</span><span class="muted">${s.sound ? 'On' : 'Off'}</span></button>
+      <button class="list-row" data-act="set-sets"><span>Sets per new exercise</span><span class="muted">${s.sets}</span></button>
     </div>
     <div class="note">Changing the unit only changes the label; numbers you already logged are not converted.</div>
     <div class="section-label">Your data</div>
@@ -1268,9 +1269,9 @@ const ACTIONS = {
       const we = findWE(w, o.weId); if (we) we.exerciseId = o.selected[0];
     } else {
       for (const id of o.selected) {
-        // pre-fill set count from last time this exercise was done
+        // set count comes from Settings; set types (warm-up etc.) are copied from last time
         const prev = previousSets(id);
-        const n = Math.max(1, Math.min(prev.length || 3, 10));
+        const n = state.settings.sets || 3;
         w.exercises.push(newWorkoutExercise(id, Array.from({ length: n }, (_, k) => newSet('', '', prev[k] ? prev[k].type : 'n'))));
       }
     }
@@ -1431,6 +1432,11 @@ const ACTIONS = {
     const opts = [0, 30, 45, 60, 90, 120, 150, 180, 240, 300].map(v => ({ label: v ? fmtDuration(v * 1000) : 'Off', value: String(v) }));
     const c = await actionSheet('Default rest timer', opts);
     if (c != null) { state.settings.rest = +c; save(); render(); }
+  },
+  'set-sets': async () => {
+    const opts = [1, 2, 3, 4, 5, 6].map(v => ({ label: `${v} set${v > 1 ? 's' : ''}`, value: String(v) }));
+    const c = await actionSheet('Sets added with each new exercise', opts);
+    if (c != null) { state.settings.sets = +c; save(); render(); }
   },
   'toggle-sound': () => { state.settings.sound = !state.settings.sound; save(); render(); if (state.settings.sound) { unlockAudio(); beep(); } },
   'export': () => shareOrDownload(JSON.stringify(state), `ironlog-backup-${dateStamp()}.json`, 'application/json'),
