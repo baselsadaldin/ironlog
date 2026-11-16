@@ -447,7 +447,7 @@ function renderSettingsTab() {
       <button class="list-row" data-act="set-unit"><span>Weight unit</span><span class="muted">${s.unit}</span></button>
       <button class="list-row" data-act="set-rest"><span>Default rest timer</span><span class="muted">${s.rest ? fmtDuration(s.rest * 1000) : 'Off'}</span></button>
       <button class="list-row" data-act="toggle-sound"><span>Rest timer sound</span><span class="muted">${s.sound ? 'On' : 'Off'}</span></button>
-      <button class="list-row" data-act="set-sets"><span>Sets per new exercise</span><span class="muted">${s.sets}</span></button>
+      <button class="list-row" data-act="set-sets"><span>Sets for a new exercise</span><span class="muted">${s.sets}</span></button>
     </div>
     <div class="note">Changing the unit only changes the label; numbers you already logged are not converted.</div>
     <div class="section-label">Your data</div>
@@ -1269,9 +1269,9 @@ const ACTIONS = {
       const we = findWE(w, o.weId); if (we) we.exerciseId = o.selected[0];
     } else {
       for (const id of o.selected) {
-        // set count comes from Settings; set types (warm-up etc.) are copied from last time
+        // same set count (and set types) as last time; first time uses the Settings default
         const prev = previousSets(id);
-        const n = state.settings.sets || 3;
+        const n = Math.max(1, Math.min(prev.length || state.settings.sets || 3, 10));
         w.exercises.push(newWorkoutExercise(id, Array.from({ length: n }, (_, k) => newSet('', '', prev[k] ? prev[k].type : 'n'))));
       }
     }
