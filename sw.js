@@ -1,5 +1,5 @@
 // Offline support. Bump VERSION whenever you change any app file.
-const VERSION = 'ironlog-v13';
+const VERSION = 'ironlog-v14';
 const MEDIA = 'ironlog-media';
 const FILES = [
   './', './index.html', './styles.css', './app.js', './exercises.js', './exercise-info.js', './manifest.json',

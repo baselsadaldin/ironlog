@@ -103,7 +103,7 @@ function sanitize(s) {
     id: okId(w.id) ? w.id : uid(), name: str(w.name, 120), notes: str(w.notes), templateId: tplIds.has(w.templateId) ? w.templateId : null,
     start: num0(w.start), end: num0(w.end) || num0(w.start), exercises: cleanWorkoutExercises(w.exercises, exIds),
     prs: (Array.isArray(w.prs) ? w.prs : []).filter(p => p && exIds.has(p.exerciseId))
-      .map(p => ({ exerciseId: p.exerciseId, kind: str(p.kind, 40), value: num0(p.value) })),
+      .map(p => ({ exerciseId: p.exerciseId, kind: str(p.kind, 40), value: num0(p.value), ...(p.text != null ? { text: str(p.text, 60) } : {}) })),
   });
   s.history = s.history.filter(w => w && typeof w === 'object').map(cleanWorkout);
   if (s.active && typeof s.active === 'object') {
@@ -203,23 +203,61 @@ function previousSets(exerciseId, excludeId) {
   const h = historyFor(exerciseId, excludeId);
   return h.length ? h[0].sets : [];
 }
-function computePRs(record) {
-  const prs = [];
-  for (const e of record.exercises) {
-    const prior = historyFor(e.exerciseId, record.id);
-    if (!prior.length) continue; // first time doing it — not counted as a PR
-    const before = setStats(prior.flatMap(p => p.sets));
-    const now = setStats(e.sets);
-    const ex = exById(e.exerciseId);
-    if (noWeight(ex)) {
-      if (now.maxReps > before.maxReps) prs.push({ exerciseId: e.exerciseId, kind: 'Most reps', value: now.maxReps });
-      continue;
+// A set is a PR when it's either:
+//   Weight PR: heavier than anything you've ever done on this exercise (less assistance for assisted exercises)
+//   Rep PR:    more reps than you've ever done at this weight or heavier
+// Bodyweight exercises: more reps than ever. Warm-ups never count; the first time doing an exercise isn't a PR.
+function prCheck(ex, prior, s) {
+  const r = num(s.reps);
+  if (s.type === 'w' || r <= 0) return null;
+  const done = prior.filter(p => p.type !== 'w' && num(p.reps) > 0);
+  if (!done.length) return null;
+  const u = state.settings.unit;
+  if (noWeight(ex)) {
+    return r > Math.max(...done.map(p => num(p.reps))) ? { kind: 'Rep PR', text: `${fmtNum(r)} reps` } : null;
+  }
+  const w = num(s.weight), assisted = ex.category === 'Assisted Bodyweight';
+  const harder = (x, y) => assisted ? x < y : x > y;
+  const sign = ex.category === 'Weighted Bodyweight' ? '+' : assisted ? '−' : '';
+  const label = `${sign}${fmtNum(w)} ${u} × ${fmtNum(r)}`;
+  if (done.every(p => harder(w, num(p.weight)))) return { kind: 'Weight PR', text: label, weight: w, reps: r };
+  const sameOrHarder = done.filter(p => !harder(w, num(p.weight)));
+  const best = Math.max(0, ...sameOrHarder.map(p => num(p.reps)));
+  return r > best ? { kind: 'Rep PR', text: label, weight: w, reps: r } : null;
+}
+// PRs for every set of one exercise in a workout, in order (earlier sets today count as "before")
+function prSetsFor(w, exerciseId, onlyDone) {
+  const ex = exById(exerciseId), out = {};
+  const prior = historyFor(exerciseId, w.id).flatMap(h => h.sets);
+  if (!prior.length) return out; // first time doing an exercise isn't a PR
+  const seen = prior.slice();
+  for (const e of w.exercises) {
+    if (e.exerciseId !== exerciseId) continue;
+    for (const s of e.sets) {
+      if (onlyDone && !s.done) continue;
+      const hit = prCheck(ex, seen, s);
+      if (hit) out[s.id] = hit;
+      seen.push(s);
     }
-    if (now.maxW > before.maxW) prs.push({ exerciseId: e.exerciseId, kind: 'Heaviest weight', value: now.maxW });
-    if (now.e1rm > before.e1rm + 0.05) prs.push({ exerciseId: e.exerciseId, kind: 'Est. 1RM', value: round1(now.e1rm) });
-    if (now.maxVol > before.maxVol) prs.push({ exerciseId: e.exerciseId, kind: 'Best set volume', value: now.maxVol });
+  }
+  return out;
+}
+function computePRs(record) {
+  // one line per exercise per weight (the best reps at that weight), so the list stays short
+  const prs = [];
+  for (const exerciseId of [...new Set(record.exercises.map(e => e.exerciseId))]) {
+    const groups = new Map();
+    for (const hit of Object.values(prSetsFor(record, exerciseId, false))) {
+      const key = hit.weight == null ? 'bw' : hit.weight, g = groups.get(key);
+      if (!g) groups.set(key, { ...hit });
+      else if (hit.reps > g.reps || hit.weight == null) { const kind = g.kind === 'Weight PR' ? g.kind : hit.kind; Object.assign(g, hit, { kind }); }
+    }
+    for (const g of groups.values()) prs.push({ exerciseId, kind: g.kind, text: g.text });
   }
   return prs;
+}
+function prText(p) { // older saved workouts used {kind, value}
+  return p.text != null ? p.text : fmtNum(p.value) + (p.kind === 'Most reps' ? ' reps' : ' ' + state.settings.unit);
 }
 
 // ---------------------------------------------------------------- UI state
@@ -252,10 +290,12 @@ const I = {
   clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   weight: '<svg viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>',
   sets: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+  grip: '<svg viewBox="0 0 24 24" class="fill"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
 };
 
 // ---------------------------------------------------------------- render
 function render() {
+  if (drag) { drag.pendingRender = true; return; } // don't rebuild the page under your finger
   const app = document.getElementById('app');
   // preserve scroll positions
   const scrolls = {};
@@ -581,10 +621,10 @@ function renderEditor(w, mode) {
         ${showCheck ? `<button class="chk" data-act="set-done" data-we="${we.id}" data-s="${s.id}" aria-label="Complete set">${I.check}</button>` : ''}
       </div></div>`;
     }).join('');
-    return `<div class="ex-block">
-      <div class="row-between">
+    return `<div class="ex-block" data-block="${we.id}">
+      <div class="row-between ex-head">
         <button class="ex-title" data-act="ex-open" data-id="${ex.id}">${exThumb(ex, 'thumb sm')}<span>${esc(exLabel(ex))}</span></button>
-        <button class="icon-btn" data-act="ex-menu" data-we="${we.id}" aria-label="Exercise options">${I.more}</button>
+        <span class="ex-tools">${w.exercises.length > 1 ? `<span class="icon-btn grip" data-grip aria-label="Drag to reorder">${I.grip}</span>` : ''}<button class="icon-btn" data-act="ex-menu" data-we="${we.id}" aria-label="Exercise options">${I.more}</button></span>
       </div>
       ${we.note != null ? `<textarea class="notes ex-note" data-f="exnote" data-we="${we.id}" placeholder="Exercise note" rows="1">${esc(we.note)}</textarea>` : ''}
       <div class="set-row head ${showCheck ? '' : 'nocheck'}"><span>Set</span><span>Previous</span><span>${bw ? '' : esc(weightHeader(ex))}</span><span>Reps</span>${showCheck ? `<span class="hchk">${I.check}</span>` : ''}</div>
@@ -688,7 +728,7 @@ function renderWorkoutDetail(o, i) {
       </div>
       ${w.notes ? `<div class="card">${esc(w.notes)}</div>` : ''}
       ${prs.length ? `<div class="card pr-card"><div class="section-label" style="margin-top:0">${I.trophy}Personal records</div>
-        ${prs.map(p => `<div class="hist-line"><span>${esc(exLabel(exById(p.exerciseId)))}</span><span>${esc(p.kind)}: <b>${fmtNum(p.value)}</b></span></div>`).join('')}</div>` : ''}
+        ${prs.map(p => `<div class="hist-line"><span>${esc(exLabel(exById(p.exerciseId)))}</span><span>${esc(p.kind)}: <b>${esc(prText(p))}</b></span></div>`).join('')}</div>` : ''}
       ${body}
       <button class="btn primary block" data-act="wk-again" data-id="${w.id}">Perform Again</button>
       <div class="bottom-space"></div>
@@ -921,31 +961,7 @@ document.getElementById('import-file').addEventListener('change', async e => {
 });
 
 // ---------------------------------------------------------------- PRs: live detection + celebration
-function prFlags(w, we) {
-  // which completed sets in this workout beat everything you'd done before (incl. earlier sets today)
-  const out = {};
-  const prior = historyFor(we.exerciseId, w.id);
-  if (!prior.length) return out; // first time doing an exercise isn't a PR
-  const ex = exById(we.exerciseId), bw = noWeight(ex), u = state.settings.unit;
-  const best = setStats(prior.flatMap(p => p.sets));
-  for (const e of w.exercises) {
-    if (e.exerciseId !== we.exerciseId) continue;
-    for (const s of e.sets) {
-      if (!s.done || s.type === 'w') continue;
-      const c = setStats([s]), k = [];
-      if (bw) { if (c.maxReps > best.maxReps) k.push({ kind: 'Most reps', value: c.maxReps, unit: 'reps' }); }
-      else {
-        if (c.e1rm > best.e1rm + 0.05) k.push({ kind: 'Est. 1RM', value: round1(c.e1rm), unit: u });
-        if (c.maxW > best.maxW) k.push({ kind: 'Heaviest weight', value: c.maxW, unit: u });
-        if (c.maxVol > best.maxVol) k.push({ kind: 'Best set volume', value: c.maxVol, unit: u });
-      }
-      best.maxW = Math.max(best.maxW, c.maxW); best.e1rm = Math.max(best.e1rm, c.e1rm);
-      best.maxVol = Math.max(best.maxVol, c.maxVol); best.maxReps = Math.max(best.maxReps, c.maxReps);
-      if (k.length) out[s.id] = k;
-    }
-  }
-  return out;
-}
+function prFlags(w, we) { return prSetsFor(w, we.exerciseId, true); }
 
 function celebratePR(hit) {
   const row = document.querySelector(`[data-row="${hit.setId}"]`);
@@ -954,8 +970,7 @@ function celebratePR(hit) {
   confetti({ x: r.left + r.width / 2, y: r.top + r.height / 2, count: 80, spread: 1.3, power: 10 });
   chime([523.25, 659.25, 783.99, 1046.5]);
   haptic();
-  const main = hit.kinds[0];
-  prBanner(exLabel(hit.ex), `${main.kind}: ${fmtNum(main.value)} ${main.unit}`);
+  prBanner(exLabel(hit.ex), `${hit.kind.kind}: ${hit.kind.text}`);
 }
 
 let bannerTimer;
@@ -1066,7 +1081,7 @@ function renderSummary(o) {
       <div class="sum-prs">${byEx.map((g, i) => {
         const ex = exById(g.exerciseId);
         return `<div class="sum-pr" style="animation-delay:${0.6 + i * 0.12}s">${exThumb(ex)}
-          <div class="ex-txt"><b>${esc(exLabel(ex))}</b>${g.items.map(p => `<span class="small">${esc(p.kind)} <b class="gold-txt">${fmtNum(p.value)}${p.kind === 'Most reps' ? ' reps' : ' ' + u}</b></span>`).join('')}</div>
+          <div class="ex-txt"><b>${esc(exLabel(ex))}</b>${g.items.map(p => `<span class="small">${esc(p.kind)} <b class="gold-txt">${esc(prText(p))}</b></span>`).join('')}</div>
           <span class="pr-chip">${I.trophy}${g.items.length}</span></div>`;
       }).join('')}</div>`
       : `<p class="muted center sum-nopr">No PRs this time. Consistency is what builds them, so keep showing up!</p>`}
@@ -1198,6 +1213,98 @@ function maybeShowSetTip() {
   setTimeout(() => toast('Tip: swipe a set left to delete it. Tap the set number for more options.'), 900);
 }
 
+
+// ---------------------------------------------------------------- drag exercises to reorder
+// Grab the ⋮⋮ handle (or press and hold the exercise name) and drag. While dragging, every
+// exercise collapses to just its name so the whole workout fits on screen.
+let drag = null, dragHold = null, dragSuppressClick = 0;
+function startDrag(block, y) {
+  const ctxEl = block.closest('[data-ctx]'), scroller = block.closest('.scroll');
+  const blocks = [...ctxEl.querySelectorAll('.ex-block[data-block]')];
+  if (blocks.length < 2) return;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  closeSwipes();
+  // collapse, then put the grabbed exercise back under the finger
+  const before = block.getBoundingClientRect().top;
+  ctxEl.classList.add('reordering');
+  const after = block.getBoundingClientRect();
+  scroller.scrollTop += after.top - Math.min(before, y - after.height / 2);
+  const sc = scroller.scrollTop;
+  const slots = blocks.map(b => { const r = b.getBoundingClientRect(); return { el: b, top: r.top + sc, h: r.height }; });
+  const from = blocks.indexOf(block);
+  const step = slots.length > 1 ? slots[1].top - slots[0].top : slots[0].h;
+  block.classList.add('dragging');
+  drag = { ctx: ctxEl.dataset.ctx, ctxEl, scroller, block, slots, from, to: from, step, startY: slots[from].top + slots[from].h / 2, y, raf: 0 }; // card centers on the finger
+  haptic();
+  dragFrame();
+}
+function dragFrame() {
+  if (!drag) return;
+  const d = drag, sr = d.scroller.getBoundingClientRect(), edge = 70;
+  // auto-scroll near the top/bottom edge
+  if (d.y < sr.top + edge) d.scroller.scrollTop -= Math.ceil((sr.top + edge - d.y) / 6);
+  else if (d.y > sr.bottom - edge) d.scroller.scrollTop += Math.ceil((d.y - (sr.bottom - edge)) / 6);
+  dragUpdate();
+  d.raf = requestAnimationFrame(dragFrame);
+}
+function dragUpdate() {
+  const d = drag; if (!d) return;
+  const dy = d.y + d.scroller.scrollTop - d.startY;
+  d.block.style.transform = `translateY(${dy}px)`;
+  const center = d.slots[d.from].top + d.slots[d.from].h / 2 + dy;
+  const to = d.slots.filter((s, i) => i !== d.from && s.top + s.h / 2 < center).length;
+  if (to !== d.to) { d.to = to; haptic(); }
+  d.slots.forEach((s, i) => {
+    if (i === d.from) return;
+    const shift = (d.from < i && i <= d.to) ? -d.step : (d.to <= i && i < d.from) ? d.step : 0;
+    s.el.style.transform = shift ? `translateY(${shift}px)` : '';
+  });
+}
+function endDrag(commit) {
+  const d = drag; if (!d) return;
+  cancelAnimationFrame(d.raf);
+  drag = null;
+  dragSuppressClick = Date.now();
+  const w = ctxWorkout(d.ctx);
+  if (commit && w && d.to !== d.from) {
+    const [m] = w.exercises.splice(d.from, 1);
+    w.exercises.splice(d.to, 0, m);
+    persistCtx(d.ctx);
+  }
+  // keep the moved exercise on screen after everything expands again
+  const id = d.block.dataset.block;
+  render();
+  const el = document.querySelector(`.ex-block[data-block="${id}"]`);
+  if (el && commit) el.scrollIntoView({ block: 'nearest' });
+}
+function cancelHold() { if (dragHold) { clearTimeout(dragHold.timer); dragHold = null; } }
+document.addEventListener('pointerdown', e => {
+  if (drag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const block = e.target.closest('.ex-block[data-block]');
+  if (!block || !block.closest('[data-ctx]')) return;
+  if (e.target.closest('[data-grip]')) { e.preventDefault(); startDrag(block, e.clientY); return; }
+  if (e.target.closest('.ex-title')) { // press and hold the name
+    cancelHold();
+    dragHold = { x: e.clientX, y: e.clientY,
+      timer: setTimeout(() => { const h = dragHold; dragHold = null; startDrag(block, h.y); }, 380) };
+  }
+});
+document.addEventListener('pointermove', e => {
+  if (dragHold && Math.hypot(e.clientX - dragHold.x, e.clientY - dragHold.y) > 8) cancelHold();
+  if (drag) { drag.y = e.clientY; dragUpdate(); }
+});
+document.addEventListener('pointerup', () => { cancelHold(); endDrag(true); });
+// iOS may cancel the pointer once a press-and-hold turns into a drag; touchend finishes it instead
+document.addEventListener('pointercancel', e => { cancelHold(); if (e.pointerType !== 'touch') endDrag(true); });
+document.addEventListener('touchend', () => endDrag(true));
+document.addEventListener('touchcancel', () => endDrag(true));
+// iOS: stop the page from scrolling while an exercise is being dragged
+document.addEventListener('touchmove', e => { if (drag) { e.preventDefault(); drag.y = e.touches[0].clientY; dragUpdate(); } }, { passive: false });
+document.addEventListener('contextmenu', e => { if (drag || e.target.closest('.ex-title, [data-grip]')) e.preventDefault(); });
+document.addEventListener('click', e => {
+  if (Date.now() - dragSuppressClick < 400) { e.stopPropagation(); e.preventDefault(); }
+}, true);
+
 // ---------------------------------------------------------------- actions
 function getCtx(el) { const c = el.closest('[data-ctx]'); return c ? c.dataset.ctx : null; }
 function findWE(w, id) { return w.exercises.find(e => e.id === id); }
@@ -1318,8 +1425,8 @@ const ACTIONS = {
       s.done = true;
       if (ctx === 'active') {
         startRest();
-        const kinds = prFlags(w, we)[s.id];
-        if (kinds) prHit = { ex: exById(we.exerciseId), kinds, setId: s.id, rect: el.getBoundingClientRect() };
+        const kind = prFlags(w, we)[s.id];
+        if (kind) prHit = { ex: exById(we.exerciseId), kind, setId: s.id, rect: el.getBoundingClientRect() };
       }
     } else s.done = false;
     persistCtx(ctx); render();
@@ -1330,13 +1437,10 @@ const ACTIONS = {
     const c = await actionSheet(exLabel(exById(we.exerciseId)), [
       { label: we.note != null ? 'Remove note' : 'Add note', value: 'note' },
       { label: 'Replace exercise', value: 'replace' },
-      ...(i > 0 ? [{ label: 'Move up', value: 'up' }] : []),
-      ...(i < w.exercises.length - 1 ? [{ label: 'Move down', value: 'down' }] : []),
       { label: 'Remove exercise', value: 'remove', danger: true }]);
     if (!c) return;
     if (c === 'note') we.note = we.note != null ? undefined : '';
     if (c === 'replace') { push({ type: 'picker', mode: 'replace', ctx, weId: we.id, selected: [], q: '', part: 'All' }); return; }
-    if (c === 'up' || c === 'down') { const j = c === 'up' ? i - 1 : i + 1; [w.exercises[i], w.exercises[j]] = [w.exercises[j], w.exercises[i]]; }
     if (c === 'remove') w.exercises.splice(i, 1);
     persistCtx(ctx); render();
   },

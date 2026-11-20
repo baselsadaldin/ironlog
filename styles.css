@@ -359,3 +359,13 @@ svg.fill { fill: currentColor; stroke: none; }
 .swipe.removing { transition: max-height .2s ease .05s, opacity .2s; max-height: 0; opacity: 0; }
 .toast { display: flex; align-items: center; gap: 14px; }
 .toast-btn { color: #4da3ff; font-weight: 700; font-size: 15px; padding: 2px 4px; }
+
+/* drag to reorder exercises */
+.ex-tools { display: inline-flex; align-items: center; flex: none; }
+.icon-btn.grip { color: var(--muted); touch-action: none; cursor: grab; }
+.ex-title, .grip { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.reordering .ex-block > :not(.ex-head) { display: none; }
+.reordering .ex-block { margin: 8px 0; padding: 8px 10px; border-radius: 12px; background: var(--fill); transition: transform .18s ease; }
+.reordering .ex-block > .ex-head { margin-bottom: 0; }
+.reordering .ex-block.dragging { transition: none; position: relative; z-index: 5; background: var(--bg); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.reordering .ex-block.dragging .grip { cursor: grabbing; }
